@@ -603,11 +603,15 @@ data Schema = Schema
   , _schemaDescription :: Maybe Text
   , _schemaRequired :: [ParamName]
 
+  , _schemaNullable :: Maybe Bool
   , _schemaAllOf :: Maybe [Referenced Schema]
+  , _schemaOneOf :: Maybe [Referenced Schema]
+  --, _schemaNot :: Maybe (Referenced Schema) FIXME name clash
+  , _schemaAnyOf :: Maybe [Referenced Schema]
   , _schemaProperties :: InsOrdHashMap Text (Referenced Schema)
   , _schemaAdditionalProperties :: Maybe AdditionalProperties
 
-  , _schemaDiscriminator :: Maybe Text
+  , _schemaDiscriminator :: Maybe Text -- FIXME Discriminator object
   , _schemaReadOnly :: Maybe Bool
   , _schemaXml :: Maybe Xml
   , _schemaExternalDocs :: Maybe ExternalDocs
