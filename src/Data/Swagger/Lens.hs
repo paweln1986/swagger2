@@ -41,7 +41,7 @@ makeFields ''Tag
 makeFields ''Operation
 makeLensesWith swaggerFieldRules ''Param
 makeFields ''Header
-makeFields ''Schema
+makeLensesWith swaggerFieldRules ''Schema
 makeFields ''NamedSchema
 makeLensesWith swaggerFieldRules ''ParamSchema
 makeFields ''Xml

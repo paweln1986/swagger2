@@ -186,7 +186,7 @@ instance IsString Server where
 -- All objects defined within the components object will have no effect on the API
 -- unless they are explicitly referenced from properties outside the components object.
 data Components = Components
-  { _componentsSchemas :: Definitions Schema -- TODO check Schema itself
+  { _componentsSchemas :: Definitions Schema
   , _componentsResponses :: Definitions Response
   , _componentsParameters :: Definitions Param
   , _componentsExamples :: Definitions Example
@@ -647,7 +647,7 @@ data Schema = Schema
   , _schemaNullable :: Maybe Bool
   , _schemaAllOf :: Maybe [Referenced Schema]
   , _schemaOneOf :: Maybe [Referenced Schema]
-  --, _schemaNot :: Maybe (Referenced Schema) FIXME name clash
+  , _schemaNot :: Maybe (Referenced Schema)
   , _schemaAnyOf :: Maybe [Referenced Schema]
   , _schemaProperties :: InsOrdHashMap Text (Referenced Schema)
   , _schemaAdditionalProperties :: Maybe AdditionalProperties
