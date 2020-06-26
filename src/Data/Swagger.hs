@@ -85,6 +85,7 @@ module Data.Swagger (
   -- ** Security
   SecurityScheme(..),
   SecuritySchemeType(..),
+  SecurityDefinitions(..),
   SecurityRequirement(..),
 
   -- *** API key
