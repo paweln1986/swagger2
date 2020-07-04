@@ -1071,6 +1071,7 @@ instance Semigroup SecurityDefinitions where
 
 instance Monoid SecurityDefinitions where
   mempty = SecurityDefinitions InsOrdHashMap.empty
+  mappend = (<>)
 
 instance Semigroup RequestBody where
   (<>) = genericMappend
