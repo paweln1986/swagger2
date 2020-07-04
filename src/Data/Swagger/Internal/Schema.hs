@@ -42,6 +42,7 @@ import Data.IntSet (IntSet)
 import Data.IntMap (IntMap)
 import Data.List.NonEmpty.Compat (NonEmpty)
 import Data.Map (Map)
+import Data.Maybe (fromMaybe)
 import Data.Proxy
 import Data.Scientific (Scientific)
 import Data.Fixed (Fixed, HasResolution, Pico)
@@ -809,24 +810,29 @@ instance (GSumToSchema f, GSumToSchema g) => GSumToSchema (f :+: g) where
 
 -- | Convert one component of the sum to schema, to be later combined with @oneOf@.
 gsumConToSchemaWith :: forall c f. (GToSchema (C1 c f), Constructor c) =>
-  Referenced Schema -> SchemaOptions -> Proxy (C1 c f) -> (T.Text, Referenced Schema)
+  Maybe (Referenced Schema) -> SchemaOptions -> Proxy (C1 c f) -> (T.Text, Referenced Schema)
 gsumConToSchemaWith ref opts _ = (tag, schema)
   where
     schema = case sumEncoding opts of
       TaggedObject tagField contentsField ->
-        -- FIXME some bullshit here
         case ref of
-          Inline sub | sub ^. type_ == Just SwaggerObject && isRecord -> Inline $ sub
+          -- If subschema is an object and constructor is a record, we add tag directly
+          -- to the record, as Aeson does it.
+          Just (Inline sub) | sub ^. type_ == Just SwaggerObject && isRecord -> Inline $ sub
             & required <>~ [T.pack tagField]
             & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])
+
+          -- If it is not a record, we need to put subschema into "contents" field.
           _ | not isRecord -> Inline $ mempty
             & type_ ?~ SwaggerObject
-            & required .~ [T.pack tagField, T.pack contentsField]
+            & required .~ [T.pack tagField]
             & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])
-            & properties . at (T.pack contentsField) ?~ ref
-          -- If it's not an object, we have to combine stuff with allOf
-          -- FIXME unwrapUnary for sum types
-          -- FIXME discard nullary sub
+              -- If constructor is nullary, there is no content.
+            & case ref of
+                Just r -> (properties . at (T.pack contentsField) ?~ r) . (required <>~ [T.pack contentsField])
+                Nothing -> id
+
+          -- In the remaining cases we combine "tag" object and "contents" object using allOf.
           _ -> Inline $ mempty
             & type_ ?~ SwaggerObject
             & allOf ?~ [Inline $ mempty
@@ -834,24 +840,25 @@ gsumConToSchemaWith ref opts _ = (tag, schema)
               & required .~ (T.pack tagField : if isRecord then [] else [T.pack contentsField])
               & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])]
             & if isRecord
-                 then allOf . _Just <>~ [ref]
-                 else allOf . _Just <>~ [Inline $ mempty & type_ ?~ SwaggerObject & properties . at (T.pack contentsField) ?~ ref]
-      UntaggedValue -> ref
+                 then allOf . _Just <>~ [refOrNullary]
+                 else allOf . _Just <>~ [Inline $ mempty & type_ ?~ SwaggerObject & properties . at (T.pack contentsField) ?~ refOrNullary]
+      UntaggedValue -> refOrEnum -- Aeson encodes nullary constructors as strings in this case.
       ObjectWithSingleField -> Inline $ mempty
         & type_ ?~ SwaggerObject
         & required .~ [tag]
-        & properties . at tag ?~ ref
+        & properties . at tag ?~ refOrNullary
       TwoElemArray -> error "unrepresentable in OpenAPI 3"
 
     tag = T.pack (constructorTagModifier opts (conName (Proxy3 :: Proxy3 c f p)))
     isRecord = conIsRecord (Proxy3 :: Proxy3 c f p)
-    -- FIXME when sub is not object
+    refOrNullary = fromMaybe (Inline nullarySchema) ref
+    refOrEnum = fromMaybe (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag]) ref
 
 gsumConToSchema :: (GToSchema (C1 c f), Constructor c) =>
   SchemaOptions -> Proxy (C1 c f) -> Declare (Definitions Schema) [(T.Text, Referenced Schema)]
 gsumConToSchema opts proxy = do
   ref <- gdeclareSchemaRef opts proxy
-  return [gsumConToSchemaWith ref opts proxy]
+  return [gsumConToSchemaWith (Just ref) opts proxy]
 
 instance {-# OVERLAPPABLE #-} (Constructor c, GToSchema f) => GSumToSchema (C1 c f) where
   gsumToSchema opts proxy = do
@@ -864,7 +871,7 @@ instance (Constructor c, Selector s, GToSchema f) => GSumToSchema (C1 c (S1 s f)
     lift $ gsumConToSchema opts proxy
 
 instance Constructor c => GSumToSchema (C1 c U1) where
-  gsumToSchema opts proxy = pure $ (:[]) $ gsumConToSchemaWith (Inline nullarySchema) opts proxy
+  gsumToSchema opts proxy = pure $ (:[]) $ gsumConToSchemaWith Nothing opts proxy
 
 data Proxy2 a b = Proxy2
 

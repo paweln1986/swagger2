@@ -637,8 +637,7 @@ lightSchemaJSON = [aesonQQ|
   "oneOf": [
     {
       "required": [
-        "tag",
-        "contents"
+        "tag"
       ],
       "type": "object",
       "properties": {
@@ -647,12 +646,6 @@ lightSchemaJSON = [aesonQQ|
           "enum": [
             "NoLight"
           ]
-        },
-        "contents": {
-          "example": [],
-          "items": {},
-          "maxItems": 0,
-          "type": "array"
         }
       }
     },
@@ -723,8 +716,7 @@ lightInlinedSchemaJSON = [aesonQQ|
   "oneOf": [
     {
       "required": [
-        "tag",
-        "contents"
+        "tag"
       ],
       "type": "object",
       "properties": {
@@ -733,12 +725,6 @@ lightInlinedSchemaJSON = [aesonQQ|
           "enum": [
             "NoLight"
           ]
-        },
-        "contents": {
-          "example": [],
-          "items": {},
-          "maxItems": 0,
-          "type": "array"
         }
       }
     },
