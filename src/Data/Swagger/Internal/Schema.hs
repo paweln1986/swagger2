@@ -22,12 +22,13 @@ module Data.Swagger.Internal.Schema where
 import Prelude ()
 import Prelude.Compat
 
-import Control.Lens
+import Control.Lens hiding (allOf)
 import Data.Data.Lens (template)
 
 import Control.Monad
 import Control.Monad.Writer
-import Data.Aeson (ToJSON (..), ToJSONKey (..), ToJSONKeyFunction (..), Value (..), Object(..))
+import Data.Aeson (Object (..), SumEncoding (..), ToJSON (..), ToJSONKey (..),
+                   ToJSONKeyFunction (..), Value (..))
 import Data.Char
 import Data.Data (Data)
 import Data.Foldable (traverse_)
@@ -135,7 +136,7 @@ class ToSchema a where
   -- Note that the schema itself is included in definitions
   -- only if it is recursive (and thus needs its definition in scope).
   declareNamedSchema :: Proxy a -> Declare (Definitions Schema) NamedSchema
-  default declareNamedSchema :: (Generic a, GToSchema (Rep a), TypeHasSimpleShape a "genericDeclareNamedSchemaUnrestricted") =>
+  default declareNamedSchema :: (Generic a, GToSchema (Rep a)) =>
     Proxy a -> Declare (Definitions Schema) NamedSchema
   declareNamedSchema = genericDeclareNamedSchema defaultSchemaOptions
 
@@ -443,7 +444,9 @@ instance HasResolution a => ToSchema (Fixed a) where declareNamedSchema = plain 
 instance ToSchema a => ToSchema (Maybe a) where
   declareNamedSchema _ = declareNamedSchema (Proxy :: Proxy a)
 
-instance (ToSchema a, ToSchema b) => ToSchema (Either a b)
+instance (ToSchema a, ToSchema b) => ToSchema (Either a b) where
+  -- To match Aeson instance
+  declareNamedSchema = genericDeclareNamedSchema defaultSchemaOptions { sumEncoding = ObjectWithSingleField }
 
 instance ToSchema () where
   declareNamedSchema _ = pure (NamedSchema Nothing nullarySchema)
@@ -637,32 +640,17 @@ toSchemaBoundedEnumKeyMapping :: forall map key value.
 toSchemaBoundedEnumKeyMapping = flip evalDeclare mempty . declareSchemaBoundedEnumKeyMapping
 
 -- | A configurable generic @'Schema'@ creator.
-genericDeclareSchema :: (Generic a, GToSchema (Rep a), TypeHasSimpleShape a "genericDeclareSchemaUnrestricted") =>
+genericDeclareSchema :: (Generic a, GToSchema (Rep a)) =>
   SchemaOptions -> Proxy a -> Declare (Definitions Schema) Schema
-genericDeclareSchema = genericDeclareSchemaUnrestricted
+genericDeclareSchema opts proxy = _namedSchemaSchema <$> genericDeclareNamedSchema opts proxy
 
 -- | A configurable generic @'NamedSchema'@ creator.
 -- This function applied to @'defaultSchemaOptions'@
 -- is used as the default for @'declareNamedSchema'@
 -- when the type is an instance of @'Generic'@.
-genericDeclareNamedSchema :: (Generic a, GToSchema (Rep a), TypeHasSimpleShape a "genericDeclareNamedSchemaUnrestricted") =>
+genericDeclareNamedSchema :: forall a. (Generic a, GToSchema (Rep a)) =>
   SchemaOptions -> Proxy a -> Declare (Definitions Schema) NamedSchema
-genericDeclareNamedSchema = genericDeclareNamedSchemaUnrestricted
-
--- | A configurable generic @'Schema'@ creator.
---
--- Unlike 'genericDeclareSchema' also works for mixed sum types.
--- Use with care since some Swagger tools do not support well schemas for mixed sum types.
-genericDeclareSchemaUnrestricted :: (Generic a, GToSchema (Rep a)) => SchemaOptions -> Proxy a -> Declare (Definitions Schema) Schema
-genericDeclareSchemaUnrestricted opts proxy = _namedSchemaSchema <$> genericDeclareNamedSchemaUnrestricted opts proxy
-
--- | A configurable generic @'NamedSchema'@ creator.
---
--- Unlike 'genericDeclareNamedSchema' also works for mixed sum types.
--- Use with care since some Swagger tools do not support well schemas for mixed sum types.
-genericDeclareNamedSchemaUnrestricted :: forall a. (Generic a, GToSchema (Rep a)) =>
-  SchemaOptions -> Proxy a -> Declare (Definitions Schema) NamedSchema
-genericDeclareNamedSchemaUnrestricted opts _ = gdeclareNamedSchema opts (Proxy :: Proxy (Rep a)) mempty
+genericDeclareNamedSchema opts _ = gdeclareNamedSchema opts (Proxy :: Proxy (Rep a)) mempty
 
 -- | Derive a 'Generic'-based name for a datatype and assign it to a given 'Schema'.
 genericNameSchema :: forall a d f.
@@ -791,56 +779,92 @@ instance ( GSumToSchema f
          , GSumToSchema g
          ) => GToSchema (f :+: g)
    where
-  gdeclareNamedSchema = gdeclareNamedSumSchema
+  -- Aeson does not unwrap unary record in sum types.
+  gdeclareNamedSchema opts p s = gdeclareNamedSumSchema (opts { unwrapUnaryRecords = False } )p s
 
 gdeclareNamedSumSchema :: GSumToSchema f => SchemaOptions -> Proxy f -> Schema -> Declare (Definitions Schema) NamedSchema
-gdeclareNamedSumSchema opts proxy s
-  | allNullaryToStringTag opts && allNullary = pure $ unnamed (toStringTag sumSchema)
-  | otherwise = (unnamed . fst) <$> runWriterT declareSumSchema
+gdeclareNamedSumSchema opts proxy _
+  | allNullaryToStringTag opts && allNullary = pure $ unnamed (toStringTag sumSchemas)
+  | otherwise = do
+    (schemas, _) <- runWriterT declareSumSchema
+    return $ unnamed $ mempty
+      & type_ ?~ SwaggerObject
+      & oneOf ?~ (snd <$> schemas)
   where
-    declareSumSchema = gsumToSchema opts proxy s
-    (sumSchema, All allNullary) = undeclare (runWriterT declareSumSchema)
+    declareSumSchema = gsumToSchema opts proxy
+    (sumSchemas, All allNullary) = undeclare (runWriterT declareSumSchema)
 
-    toStringTag schema = mempty
+    toStringTag schemas = mempty
       & type_ ?~ SwaggerString
-      & enum_ ?~ map toJSON  (schema ^.. properties.ifolded.asIndex)
+      & enum_ ?~ map (String . fst) sumSchemas
 
 type AllNullary = All
 
 class GSumToSchema (f :: * -> *)  where
-  gsumToSchema :: SchemaOptions -> Proxy f -> Schema -> WriterT AllNullary (Declare (Definitions Schema)) Schema
+  gsumToSchema :: SchemaOptions -> Proxy f -> WriterT AllNullary (Declare (Definitions Schema)) [(T.Text, Referenced Schema)]
 
 instance (GSumToSchema f, GSumToSchema g) => GSumToSchema (f :+: g) where
-  gsumToSchema opts _ = gsumToSchema opts (Proxy :: Proxy f) >=> gsumToSchema opts (Proxy :: Proxy g)
+  gsumToSchema opts _ =
+    (<>) <$> gsumToSchema opts (Proxy :: Proxy f) <*> gsumToSchema opts (Proxy :: Proxy g)
 
+-- | Convert one component of the sum to schema, to be later combined with @oneOf@.
 gsumConToSchemaWith :: forall c f. (GToSchema (C1 c f), Constructor c) =>
-  Referenced Schema -> SchemaOptions -> Proxy (C1 c f) -> Schema -> Schema
-gsumConToSchemaWith ref opts _ schema = schema
-  & type_ ?~ SwaggerObject
-  & properties . at tag ?~ ref
-  & maxProperties ?~ 1
-  & minProperties ?~ 1
+  Referenced Schema -> SchemaOptions -> Proxy (C1 c f) -> (T.Text, Referenced Schema)
+gsumConToSchemaWith ref opts _ = (tag, schema)
   where
+    schema = case sumEncoding opts of
+      TaggedObject tagField contentsField ->
+        -- FIXME some bullshit here
+        case ref of
+          Inline sub | sub ^. type_ == Just SwaggerObject && isRecord -> Inline $ sub
+            & required <>~ [T.pack tagField]
+            & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])
+          _ | not isRecord -> Inline $ mempty
+            & type_ ?~ SwaggerObject
+            & required .~ [T.pack tagField, T.pack contentsField]
+            & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])
+            & properties . at (T.pack contentsField) ?~ ref
+          -- If it's not an object, we have to combine stuff with allOf
+          -- FIXME unwrapUnary for sum types
+          -- FIXME discard nullary sub
+          _ -> Inline $ mempty
+            & type_ ?~ SwaggerObject
+            & allOf ?~ [Inline $ mempty
+              & type_ ?~ SwaggerObject
+              & required .~ (T.pack tagField : if isRecord then [] else [T.pack contentsField])
+              & properties . at (T.pack tagField) ?~ (Inline $ mempty & type_ ?~ SwaggerString & enum_ ?~ [String tag])]
+            & if isRecord
+                 then allOf . _Just <>~ [ref]
+                 else allOf . _Just <>~ [Inline $ mempty & type_ ?~ SwaggerObject & properties . at (T.pack contentsField) ?~ ref]
+      UntaggedValue -> ref
+      ObjectWithSingleField -> Inline $ mempty
+        & type_ ?~ SwaggerObject
+        & required .~ [tag]
+        & properties . at tag ?~ ref
+      TwoElemArray -> error "unrepresentable in OpenAPI 3"
+
     tag = T.pack (constructorTagModifier opts (conName (Proxy3 :: Proxy3 c f p)))
+    isRecord = conIsRecord (Proxy3 :: Proxy3 c f p)
+    -- FIXME when sub is not object
 
 gsumConToSchema :: (GToSchema (C1 c f), Constructor c) =>
-  SchemaOptions -> Proxy (C1 c f) -> Schema -> Declare (Definitions Schema) Schema
-gsumConToSchema opts proxy schema = do
+  SchemaOptions -> Proxy (C1 c f) -> Declare (Definitions Schema) [(T.Text, Referenced Schema)]
+gsumConToSchema opts proxy = do
   ref <- gdeclareSchemaRef opts proxy
-  return $ gsumConToSchemaWith ref opts proxy schema
+  return [gsumConToSchemaWith ref opts proxy]
 
 instance {-# OVERLAPPABLE #-} (Constructor c, GToSchema f) => GSumToSchema (C1 c f) where
-  gsumToSchema opts proxy schema = do
+  gsumToSchema opts proxy = do
     tell (All False)
-    lift $ gsumConToSchema opts proxy schema
+    lift $ gsumConToSchema opts proxy
 
 instance (Constructor c, Selector s, GToSchema f) => GSumToSchema (C1 c (S1 s f)) where
-  gsumToSchema opts proxy schema = do
+  gsumToSchema opts proxy = do
     tell (All False)
-    lift $ gsumConToSchema opts proxy schema
+    lift $ gsumConToSchema opts proxy
 
 instance Constructor c => GSumToSchema (C1 c U1) where
-  gsumToSchema opts proxy = pure . gsumConToSchemaWith (Inline nullarySchema) opts proxy
+  gsumToSchema opts proxy = pure $ (:[]) $ gsumConToSchemaWith (Inline nullarySchema) opts proxy
 
 data Proxy2 a b = Proxy2
 
