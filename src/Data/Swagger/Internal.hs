@@ -344,17 +344,17 @@ data MediaTypeObject = MediaTypeObject
 
     -- | Example of the media type.
     -- The example object SHOULD be in the correct format as specified by the media type.
-  , _mediaTypeExample :: Maybe Value
+  , _mediaTypeObjectExample :: Maybe Value
 
     -- | Examples of the media type.
     -- Each example object SHOULD match the media type and specified schema if present.
-  , _mediaTypeExamples :: InsOrdHashMap Text (Referenced Example)
+  , _mediaTypeObjectExamples :: InsOrdHashMap Text (Referenced Example)
 
     -- | A map between a property name and its encoding information.
     -- The key, being the property name, MUST exist in the schema as a property.
     -- The encoding object SHALL only apply to 'RequestBody' objects when the media type
     -- is @multipart@ or @application/x-www-form-urlencoded@.
-  , _mediaTypeEncoding :: InsOrdHashMap Text Encoding
+  , _mediaTypeObjectEncoding :: InsOrdHashMap Text Encoding
   } deriving (Eq, Show, Generic, Data, Typeable)
 
 -- | In order to support common ways of serializing simple parameters, a set of style values are defined.
@@ -379,6 +379,8 @@ data Style
   | StyleDeepObject
     -- ^ Provides a simple way of rendering nested objects using form parameters.
   deriving (Eq, Show, Generic, Data, Typeable)
+
+-- TODO monoid
 
 data Encoding = Encoding
   { -- | The Content-Type for encoding a specific property.
