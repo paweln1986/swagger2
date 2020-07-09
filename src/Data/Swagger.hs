@@ -67,6 +67,7 @@ module Data.Swagger (
   Header(..),
   HeaderName,
   Example(..),
+  RequestBody(..),
 
   -- ** Schemas
   ParamSchema(..),
