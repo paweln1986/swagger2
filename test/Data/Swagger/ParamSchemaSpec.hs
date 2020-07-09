@@ -23,7 +23,7 @@ import Data.Time.LocalTime
 import qualified Data.HashMap.Strict as HM
 
 checkToParamSchema :: ToParamSchema a => Proxy a -> Value -> Spec
-checkToParamSchema proxy js = (toParamSchema proxy :: ParamSchema ('SwaggerKindNormal Param)) <=> js
+checkToParamSchema proxy js = (toParamSchema proxy :: ParamSchema) <=> js
 
 spec :: Spec
 spec = do
