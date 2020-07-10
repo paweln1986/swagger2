@@ -40,6 +40,7 @@ module Data.Swagger (
   Swagger(..),
   Server(..),
   ServerVariable(..),
+  Components(..),
 
   -- ** Info types
   Info(..),
@@ -68,6 +69,8 @@ module Data.Swagger (
   HeaderName,
   Example(..),
   RequestBody(..),
+  MediaTypeObject(..),
+  Encoding(..),
 
   -- ** Schemas
   ParamSchema(..),
@@ -77,6 +80,7 @@ module Data.Swagger (
   Xml(..),
   Pattern,
   AdditionalProperties(..),
+  Discriminator(..),
 
   -- ** Responses
   Responses(..),
