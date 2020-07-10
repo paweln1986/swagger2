@@ -380,8 +380,6 @@ data Style
     -- ^ Provides a simple way of rendering nested objects using form parameters.
   deriving (Eq, Show, Generic, Data, Typeable)
 
--- TODO monoid
-
 data Encoding = Encoding
   { -- | The Content-Type for encoding a specific property.
     -- Default value depends on the property type: for @string@
@@ -966,6 +964,12 @@ instance Monoid Response where
 instance Semigroup MediaTypeObject where
   (<>) = genericMappend
 instance Monoid MediaTypeObject where
+  mempty = genericMempty
+  mappend = (<>)
+
+instance Semigroup Encoding where
+  (<>) = genericMappend
+instance Monoid Encoding where
   mempty = genericMempty
   mappend = (<>)
 
